@@ -1,0 +1,72 @@
+# # Core Dependencies
+# pandas==2.1.4
+# numpy==1.24.3
+# openpyxl==3.1.2
+
+# # Geospatial
+# geopandas==0.14.1
+# folium==0.15.1
+
+# # Deep Learning
+# torch==2.1.2
+# torchvision==0.16.2
+# tensorflow==2.15.0
+
+# # Image Processing
+# opencv-python==4.8.1.78
+# Pillow==10.1.0
+# requests==2.31.0
+
+# # Machine Learning
+# scikit-learn==1.3.2
+# xgboost==2.0.3
+
+# # Visualization
+# matplotlib==3.8.2
+# seaborn==0.13.0
+# plotly==5.18.0
+
+# # Explainability
+# grad-cam==1.4.8
+
+# # Utilities
+# python-dotenv==1.0.0
+# tqdm==4.66.1
+# joblib==1.3.2
+
+
+# Core Dependencies
+pandas
+numpy
+openpyxl
+
+# Geospatial
+geopandas
+folium
+
+# Deep Learning
+torch
+torchvision
+tensorflow
+
+# Image Processing
+opencv-python
+Pillow
+requests
+
+# Machine Learning
+scikit-learn
+xgboost
+
+# Visualization
+matplotlib
+seaborn
+plotly
+
+# Explainability
+grad-cam
+
+# Utilities
+python-dotenv
+tqdm
+joblib
