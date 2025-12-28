@@ -10,6 +10,7 @@ from PIL import Image
 from io import BytesIO
 from tqdm import tqdm
 import pandas as pd
+import numpy as np
 
 from config import Config
 
@@ -113,6 +114,66 @@ class SatelliteImageFetcher:
             print(f"Error fetching Mapbox image for ({lat}, {lon}): {e}")
             return None
     
+    def get_sentinel_oauth_token(self) -> Optional[str]:
+        """
+        Get OAuth token for Sentinel Hub API
+        
+        Returns:
+            Access token or None if failed
+        """
+        token_url = "https://services.sentinel-hub.com/oauth/token"
+        
+        data = {
+            'grant_type': 'client_credentials',
+            'client_id': Config.SENTINEL_HUB_CLIENT_ID,
+            'client_secret': Config.SENTINEL_HUB_CLIENT_SECRET
+        }
+        
+        try:
+            response = requests.post(token_url, data=data, timeout=30)
+            response.raise_for_status()
+            token = response.json()['access_token']
+            return token
+        except Exception as e:
+            print(f"Error getting Sentinel Hub OAuth token: {e}")
+            return None
+    
+    def calculate_bbox(self, lat: float, lon: float, zoom: int, size: Tuple[int, int]) -> list:
+        """
+        Calculate bounding box for Sentinel Hub request
+        
+        Args:
+            lat: Latitude
+            lon: Longitude
+            zoom: Zoom level (not directly used, but kept for consistency)
+            size: Image size
+            
+        Returns:
+            Bounding box [min_lon, min_lat, max_lon, max_lat]
+        """
+        # Approximate meters per pixel at equator for different zoom levels
+        # This is a rough approximation
+        meters_per_pixel = 156543.03392 * np.cos(lat * np.pi / 180) / (2 ** zoom)
+        
+        # Calculate width and height in meters
+        width_m = size[0] * meters_per_pixel
+        height_m = size[1] * meters_per_pixel
+        
+        # Convert meters to degrees (approximate)
+        # 1 degree latitude ≈ 111,320 meters
+        # 1 degree longitude varies by latitude
+        lat_offset = height_m / 111320 / 2
+        lon_offset = width_m / (111320 * np.cos(lat * np.pi / 180)) / 2
+        
+        bbox = [
+            lon - lon_offset,  # min_lon
+            lat - lat_offset,  # min_lat
+            lon + lon_offset,  # max_lon
+            lat + lat_offset   # max_lat
+        ]
+        
+        return bbox
+    
     def fetch_sentinel_image(
         self,
         lat: float,
@@ -121,8 +182,7 @@ class SatelliteImageFetcher:
         size: Tuple[int, int] = None
     ) -> Optional[Image.Image]:
         """
-        Fetch satellite image from Sentinel Hub
-        Note: This is a simplified implementation
+        Fetch satellite image from Sentinel Hub using Sentinel-2 L2A data
         
         Args:
             lat: Latitude
@@ -133,11 +193,103 @@ class SatelliteImageFetcher:
         Returns:
             PIL Image or None if failed
         """
-        # Note: Sentinel Hub requires OAuth authentication
-        # This is a simplified version - full implementation would need proper OAuth flow
-        print("Note: Sentinel Hub integration requires additional setup")
-        print("Falling back to Google Maps API")
-        return self.fetch_google_maps_image(lat, lon, zoom, size)
+        import numpy as np
+        
+        zoom = zoom or Config.IMAGE_ZOOM
+        size = size or (Config.IMAGE_WIDTH, Config.IMAGE_HEIGHT)
+        
+        # Get OAuth token
+        token = self.get_sentinel_oauth_token()
+        if not token:
+            print("Failed to get Sentinel Hub OAuth token")
+            return None
+        
+        # Calculate bounding box
+        bbox = self.calculate_bbox(lat, lon, zoom, size)
+        
+        # Sentinel Hub Process API endpoint
+        url = "https://services.sentinel-hub.com/api/v1/process"
+        
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json',
+            'Accept': 'image/png'
+        }
+        
+        # Request payload for true color RGB image
+        payload = {
+            "input": {
+                "bounds": {
+                    "bbox": bbox,
+                    "properties": {
+                        "crs": "http://www.opengis.net/def/crs/EPSG/0/4326"
+                    }
+                },
+                "data": [
+                    {
+                        "type": "sentinel-2-l2a",
+                        "dataFilter": {
+                            "timeRange": {
+                                "from": "2023-01-01T00:00:00Z",
+                                "to": "2024-12-31T23:59:59Z"
+                            },
+                            "maxCloudCoverage": 30
+                        }
+                    }
+                ]
+            },
+            "output": {
+                "width": size[0],
+                "height": size[1],
+                "responses": [
+                    {
+                        "identifier": "default",
+                        "format": {
+                            "type": "image/png"
+                        }
+                    }
+                ]
+            },
+            "evalscript": """
+                //VERSION=3
+                function setup() {
+                    return {
+                        input: ["B04", "B03", "B02"],
+                        output: {
+                            bands: 3,
+                            sampleType: "AUTO"
+                        }
+                    };
+                }
+                
+                function evaluatePixel(sample) {
+                    // True color RGB with slight enhancement
+                    return [2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02];
+                }
+            """
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
+            
+            # Load image from response
+            img = Image.open(BytesIO(response.content))
+            return img
+            
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 400:
+                print(f"Bad request for ({lat}, {lon}): {e.response.text}")
+            elif e.response.status_code == 401:
+                print(f"Authentication error - check your credentials")
+            elif e.response.status_code == 404:
+                print(f"No Sentinel data available for location ({lat}, {lon})")
+            else:
+                print(f"HTTP error fetching Sentinel image for ({lat}, {lon}): {e}")
+            return None
+        except Exception as e:
+            print(f"Error fetching Sentinel image for ({lat}, {lon}): {e}")
+            return None
     
     def fetch_image(
         self,
